@@ -1,44 +1,73 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import CameraCapture from "@/components/CameraCapture";
-import { speakMessage } from "@/lib/speech";
+import CameraCapture, { type FrameMeta } from "@/components/CameraCapture";
+import CaptionOverlay from "@/components/CaptionOverlay";
+import IntentPanel from "@/components/IntentPanel";
+import Transcript, { type Utterance } from "@/components/Transcript";
 
-import type {
-  ClarificationOption,
-  SignalInterpretation,
-} from "@/types/signalbridge";
+import { DEMO_AMBIGUOUS, DEMO_CLEAR } from "@/lib/demo";
+import { resolveWithChoice } from "@/lib/intent";
+import { useSpeech } from "@/lib/useSpeech";
+import type { SignalInterpretation } from "@/types/signalbridge";
 
-function Field({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-        {label}
-      </p>
+const NAV = [
+  { label: "Speak", href: "#speak" },
+  { label: "How it reads", href: "#reads" },
+  { label: "Honesty", href: "#honesty" },
+  { label: "Access", href: "#access" },
+];
 
-      <p className="mt-2 text-lg">
-        {value || (
-          <span className="text-zinc-600">Not relevant</span>
-        )}
-      </p>
-    </div>
-  );
-}
+const STEPS = [
+  {
+    title: "See",
+    body: "Six frames over three and a half seconds — a sequence, not a snapshot. Each one carries its timestamp and how much was moving.",
+  },
+  {
+    title: "Infer",
+    body: "Objects are ranked, not scored. Only meaning the frames actually support gets through; the rest is left open on purpose.",
+  },
+  {
+    title: "Confirm",
+    body: "If two readings are both plausible, it asks one question instead of guessing. Then it says the sentence out loud.",
+  },
+];
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
-  const [result, setResult] =
-    useState<SignalInterpretation | null>(null);
+  const [result, setResult] = useState<SignalInterpretation | null>(null);
   const [error, setError] = useState("");
+  const [transcript, setTranscript] = useState<Utterance[]>([]);
 
-  async function interpret(frames: string[]) {
+  const message =
+    result && !result.needsClarification ? result.finalMessage : "";
+
+  const { speaking, spokenWord, read, stop, reset } = useSpeech(message);
+
+  const logged = useRef("");
+
+  // Every resolved sentence joins the transcript, so a demo reads as one
+  // conversation rather than a series of disconnected guesses.
+  useEffect(() => {
+    if (!message.trim() || logged.current === message) return;
+
+    logged.current = message;
+
+    setTranscript((previous) => [
+      ...previous,
+      {
+        id: Date.now(),
+        text: message,
+        at: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+      },
+    ]);
+  }, [message]);
+
+  async function interpret(frames: string[], meta: FrameMeta[]) {
     setLoading(true);
     setError("");
     setResult(null);
@@ -46,249 +75,225 @@ export default function Home() {
     try {
       const response = await fetch("/api/interpret", {
         method: "POST",
+
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ frames }),
+
+        body: JSON.stringify({
+          frames,
+          meta,
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.error || "Interpretation failed."
-        );
+        throw new Error(data.error || "Interpretation failed.");
       }
 
-      const interpretation =
-        data.interpretation as SignalInterpretation;
-
-      setResult(interpretation);
-
-      if (
-        !interpretation.needsClarification &&
-        interpretation.finalMessage
-      ) {
-        speakMessage(interpretation.finalMessage);
-      }
+      setResult(data.interpretation);
     } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Something went wrong."
-      );
+      setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
       setLoading(false);
     }
   }
 
-  function resolveClarification(option: ClarificationOption) {
-    if (!result) return;
-
-    const resolved: SignalInterpretation = {
-      ...result,
-      needsClarification: false,
-      ambiguousField: "",
-      clarificationQuestion: "",
-      clarificationOptions: [],
-      finalMessage: option.finalMessage,
-    };
-
-    setResult(resolved);
-    speakMessage(option.finalMessage);
+  function preview(next: SignalInterpretation) {
+    setError("");
+    setLoading(false);
+    reset();
+    logged.current = "";
+    setResult(next);
   }
 
-  return (
-    <main className="min-h-screen bg-[#08090c] text-white">
-      <div className="mx-auto max-w-7xl px-5 py-8 md:px-8 md:py-12">
-        <header className="mb-10 border-b border-white/10 pb-8">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold uppercase tracking-[0.28em] text-cyan-400">
-              SignalBridge
-            </div>
+  function clearAll() {
+    reset();
+    logged.current = "";
+    setResult(null);
+    setError("");
+    setTranscript([]);
+  }
 
-            <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm text-emerald-300">
-              ● Ready
-            </div>
+  const showingAmbiguous = result?.needsClarification === true;
+  const showingClear = Boolean(result && !result.needsClarification);
+
+  return (
+    <div className="mx-auto w-full max-w-[72rem] px-4 pb-24 md:px-8">
+      <header className="sticky top-0 z-50 -mx-4 mb-6 flex items-center justify-between gap-4 bg-ground/80 px-4 py-3 backdrop-blur-xl md:-mx-8 md:px-8">
+        <p className="flex items-center gap-2 text-[0.9375rem] font-semibold tracking-tight">
+          <span aria-hidden className="font-mono text-accent">
+            ıllı
+          </span>
+          SignalBridge
+        </p>
+
+        <nav className="hidden rounded-full bg-surface p-1 shadow-card sm:flex">
+          {NAV.map((item) => (
+            <a
+              key={item.href}
+              href={item.href}
+              className="rounded-full px-4 py-1.5 text-label font-medium text-text-soft transition-colors duration-200 hover:bg-surface-sunk hover:text-text"
+            >
+              {item.label}
+            </a>
+          ))}
+        </nav>
+
+        <span className="flex items-center gap-2 rounded-full bg-surface px-3.5 py-1.5 text-label font-medium shadow-card">
+          <span aria-hidden className={speaking ? "text-live" : "text-accent"}>
+            ●
+          </span>
+          {speaking ? "Speaking" : "Ready"}
+        </span>
+      </header>
+
+      <p
+        id="speak"
+        className="mx-auto max-w-2xl scroll-mt-24 pb-6 text-center text-body text-text-soft"
+      >
+        Gesture to the camera. SignalBridge reads the interaction, turns it into
+        a sentence you can check, and speaks it into the room.
+      </p>
+
+      {/* The viewport is the page. Only the caption sits on the feed. */}
+      <CameraCapture loading={loading} onCapture={interpret}>
+        <CaptionOverlay
+          loading={loading}
+          error={error}
+          result={result}
+          spokenWord={spokenWord}
+          onChoose={(option) =>
+            setResult((current) =>
+              current ? resolveWithChoice(current, option) : current
+            )
+          }
+        />
+      </CameraCapture>
+
+      <div className="mt-4">
+        <Transcript
+          lines={transcript}
+          speaking={speaking}
+          canSpeak={Boolean(message)}
+          onRead={read}
+          onStop={stop}
+          onClear={clearAll}
+        />
+      </div>
+
+      <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.25fr]">
+        {/* Recorded readings — both outcomes, with no camera and no network. */}
+        <div className="rounded-card bg-surface p-4 shadow-card md:p-5">
+          <p className="px-1 pb-3 text-label font-medium">Recorded readings</p>
+
+          <div
+            role="group"
+            aria-label="Preview a recorded reading"
+            className="flex gap-1 rounded-full bg-surface-sunk/70 p-1"
+          >
+            <button
+              type="button"
+              onClick={() => preview(DEMO_CLEAR)}
+              className={`h-11 flex-1 rounded-full text-label font-semibold transition-colors duration-200 ${
+                showingClear
+                  ? "bg-surface text-text shadow-card"
+                  : "text-text-soft hover:text-text"
+              }`}
+            >
+              Reads clearly
+            </button>
+
+            <button
+              type="button"
+              onClick={() => preview(DEMO_AMBIGUOUS)}
+              className={`h-11 flex-1 rounded-full text-label font-semibold transition-colors duration-200 ${
+                showingAmbiguous
+                  ? "bg-surface text-text shadow-card"
+                  : "text-text-soft hover:text-text"
+              }`}
+            >
+              Ambiguous
+            </button>
           </div>
 
-          <h1 className="mt-6 max-w-4xl text-5xl font-semibold tracking-tight md:text-7xl">
-            Turn intent into words.
-          </h1>
-
-          <p className="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
-            When you know what you want to say,
-            but you can&apos;t get the words out.
+          <p className="mt-3 px-1 text-label text-text-soft">
+            Shows both outcomes with no camera and no network.
           </p>
-        </header>
-
-        <div className="grid gap-8 lg:grid-cols-[1.08fr_.92fr]">
-          <section>
-            <CameraCapture
-              loading={loading}
-              onCapture={interpret}
-            />
-          </section>
-
-          <section className="min-h-[520px] rounded-3xl border border-white/10 bg-[#101116] p-6 md:p-8">
-            <p className="text-xs font-semibold uppercase tracking-[0.23em] text-zinc-500">
-              What I understand
-            </p>
-
-            <h2 className="mt-2 text-2xl font-semibold">
-              Intent interpretation
-            </h2>
-
-            {!result && !loading && !error && (
-              <div className="mt-8 flex min-h-[390px] items-center justify-center rounded-2xl border border-dashed border-white/10 p-8 text-center leading-7 text-zinc-500">
-                <p>
-                  Communicate using gestures,
-                  objects, and context.
-                  <br />
-                  <br />
-                  SignalBridge will build the
-                  meaning here.
-                </p>
-              </div>
-            )}
-
-            {loading && (
-              <div className="flex min-h-[390px] items-center justify-center text-center">
-                <div>
-                  <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-zinc-700 border-t-cyan-400" />
-
-                  <p className="mt-5 text-lg font-medium">
-                    Understanding the message...
-                  </p>
-
-                  <p className="mt-2 text-sm text-zinc-500">
-                    Reading the gesture as one sequence.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {error && (
-              <div className="mt-8 rounded-2xl border border-red-400/20 bg-red-400/10 p-5 text-red-200">
-                {error}
-              </div>
-            )}
-
-            {result && (
-              <div className="mt-7 space-y-5">
-                <div className="grid grid-cols-2 gap-3">
-                  <Field
-                    label="Person"
-                    value={result.actor}
-                  />
-
-                  <Field
-                    label="Intent"
-                    value={result.intent}
-                  />
-
-                  <Field
-                    label="Action"
-                    value={result.action}
-                  />
-
-                  <Field
-                    label="Location"
-                    value={result.location}
-                  />
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Referenced objects
-                  </p>
-
-                  <div className="mt-3 space-y-3">
-                    {result.objectCandidates.length === 0 && (
-                      <p className="text-zinc-600">
-                        No referenced object identified
-                      </p>
-                    )}
-
-                    {result.objectCandidates.map(
-                      (candidate, index) => (
-                        <div
-                          key={`${candidate.value}-${index}`}
-                          className="flex items-center justify-between"
-                        >
-                          <span>{candidate.value}</span>
-
-                          <span className="text-sm text-zinc-500">
-                            {Math.round(
-                              candidate.confidence * 100
-                            )}
-                            %
-                          </span>
-                        </div>
-                      )
-                    )}
-                  </div>
-                </div>
-
-                {result.needsClarification ? (
-                  <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300">
-                      Clarification needed
-                    </p>
-
-                    <p className="mt-3 text-xl font-medium">
-                      {result.clarificationQuestion}
-                    </p>
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {result.clarificationOptions.map(
-                        (option) => (
-                          <button
-                            key={`${option.label}-${option.finalMessage}`}
-                            type="button"
-                            onClick={() =>
-                              resolveClarification(option)
-                            }
-                            className="rounded-xl border border-amber-200/25 bg-black/20 px-4 py-2 text-left transition hover:border-amber-200/50 hover:bg-amber-200/10 focus:outline-none focus:ring-2 focus:ring-amber-300/60"
-                          >
-                            {option.label}
-                          </button>
-                        )
-                      )}
-                    </div>
-                  </div>
-                ) : result.finalMessage ? (
-                  <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
-                      Message
-                    </p>
-
-                    <p className="mt-3 text-2xl font-semibold leading-snug">
-                      “{result.finalMessage}”
-                    </p>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        speakMessage(result.finalMessage)
-                      }
-                      className="mt-4 rounded-xl border border-cyan-200/20 bg-black/20 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-200/10"
-                    >
-                      Speak again
-                    </button>
-                  </div>
-                ) : null}
-
-                {result.context.length > 0 && (
-                  <p className="text-sm leading-6 text-zinc-500">
-                    {result.context.join(" • ")}
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
         </div>
-      </div>
-    </main>
+
+        <IntentPanel result={result} />
+      </section>
+
+      <section id="reads" className="mt-24 scroll-mt-24">
+        <h2 className="text-label font-medium text-text-soft">
+          How it reads you
+        </h2>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          {STEPS.map((step, index) => (
+            <div
+              key={step.title}
+              className="reveal rounded-card bg-surface p-6 shadow-card"
+            >
+              <p className="font-mono text-label text-accent">
+                {String(index + 1).padStart(3, "0")}
+              </p>
+
+              <h3 className="mt-2 text-headline">{step.title}</h3>
+
+              <p className="mt-2 text-body text-text-soft">{step.body}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section id="honesty" className="reveal mt-24 scroll-mt-24">
+        <h2 className="text-label font-medium text-text-soft">
+          When it is not sure, it asks
+        </h2>
+
+        <div className="mt-4 rounded-card bg-surface p-8 shadow-card md:p-12">
+          <p className="max-w-3xl text-headline">
+            A pointed finger can mean the cup, the window behind the cup, or the
+            person standing next to it.
+          </p>
+
+          <p className="mt-4 max-w-2xl text-body text-text-soft">
+            Most systems pick the likeliest option and present it as certainty.
+            Putting words in the mouth of someone who cannot correct you is the
+            worst failure this product could have. So when the reading is
+            genuinely ambiguous, SignalBridge stops and asks a single question —
+            and the answer resolves instantly, with no second round trip.
+          </p>
+        </div>
+      </section>
+
+      <section id="access" className="reveal mt-24 scroll-mt-24">
+        <h2 className="text-label font-medium text-text-soft">
+          Who this is for
+        </h2>
+
+        <div className="mt-4 rounded-card bg-surface p-8 shadow-card md:p-12">
+          <p className="max-w-3xl text-headline">
+            Aphasia. ALS. Autism. Post-stroke recovery. Intubation. Any morning
+            the words are simply gone.
+          </p>
+
+          <p className="mt-4 max-w-2xl text-body text-text-soft">
+            SignalBridge reads gestures and context. It does not diagnose, it
+            does not infer anything about who you are, and it does not claim to
+            translate sign language. It reports what it can see, and asks about
+            what it cannot.
+          </p>
+        </div>
+      </section>
+
+      <footer className="mt-20 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-6 text-label text-text-soft">
+        <p>SignalBridge · VTHacks 14</p>
+        <p>Camera frames are sent for interpretation and never stored.</p>
+      </footer>
+    </div>
   );
 }

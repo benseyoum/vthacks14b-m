@@ -12,7 +12,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const interpretation = await interpretFrames(body.frames);
+    const interpretation = await interpretFrames(
+      body.frames,
+      Array.isArray(body.meta) ? body.meta : undefined
+    );
 
     return NextResponse.json({
       interpretation,

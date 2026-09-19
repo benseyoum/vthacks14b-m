@@ -71,6 +71,8 @@ SignalBridge helps a person communicate when they know what they want to say but
 
 You will receive SIX camera frames in chronological order from one short nonverbal interaction. Treat them as one continuous sequence and compare what changes across time.
 
+Each frame is labelled with its timestamp and a measured motion value between 0 and 1. Motion is the amount the picture changed at that instant, measured from the video itself. Use it: the frames with the highest motion are where the gesture is actually happening, and near-zero motion frames are usually the rest position before or after it. Compare a high-motion frame against a low-motion one to work out what moved.
+
 Reason in this order:
 1. Observe the sequence: pointing, hand/body gestures, gaze, repeated motion, and interactions with objects.
 2. Identify which visible details are intentionally referenced by the communicator.
@@ -137,8 +139,14 @@ function stripDataUrl(frame: string) {
   return frame.replace(/^data:image\/jpeg;base64,/, "");
 }
 
+export type FrameMeta = {
+  t: number;
+  motion: number;
+};
+
 export async function interpretFrames(
-  frames: string[]
+  frames: string[],
+  meta?: FrameMeta[]
 ): Promise<SignalInterpretation> {
   if (frames.length === 0) {
     throw new Error("No frames supplied.");
@@ -151,8 +159,14 @@ export async function interpretFrames(
   ];
 
   frames.forEach((frame, index) => {
+    const info = meta?.[index];
+
+    // Timing and measured motion let the model find the peak of the gesture
+    // instead of weighting six near-identical stills equally.
     parts.push({
-      text: `Frame ${index + 1} of ${frames.length}`,
+      text: info
+        ? `Frame ${index + 1} of ${frames.length} · t=${info.t.toFixed(2)}s · motion=${info.motion.toFixed(2)}`
+        : `Frame ${index + 1} of ${frames.length}`,
     });
 
     parts.push({
