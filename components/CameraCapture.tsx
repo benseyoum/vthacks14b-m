@@ -18,8 +18,6 @@ type Props = {
   children?: ReactNode;
 };
 
-type FacingMode = "user" | "environment";
-
 const FRAME_COUNT = 6;
 const FRAME_GAP = 650;
 const COUNT_IN = 700;
@@ -44,7 +42,6 @@ export default function CameraCapture({
   const [capturing, setCapturing] = useState(false);
   const [countIn, setCountIn] = useState(0);
   const [taken, setTaken] = useState(0);
-  const [facingMode, setFacingMode] = useState<FacingMode>("user");
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -53,7 +50,7 @@ export default function CameraCapture({
     async function startCamera() {
       try {
         const media = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: facingMode } },
+          video: true,
           audio: false,
         });
 
@@ -85,7 +82,7 @@ export default function CameraCapture({
       cancelled = true;
       stream?.getTracks().forEach((track) => track.stop());
     };
-  }, [facingMode]);
+  }, []);
 
   // Measure how much the picture is changing and feed the caption tick strip.
   useEffect(() => {
@@ -149,8 +146,6 @@ export default function CameraCapture({
       throw new Error("Could not capture camera frame.");
     }
 
-    // The preview is mirrored for the person using it, but the frame sent to
-    // the model is not — it should see the room the way it actually is.
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     return canvas.toDataURL("image/jpeg", 0.82);
@@ -235,9 +230,7 @@ export default function CameraCapture({
             autoPlay
             muted
             playsInline
-            className={`absolute inset-0 h-full w-full object-cover ${
-              facingMode === "user" ? "-scale-x-100" : ""
-            }`}
+            className="absolute inset-0 h-full w-full object-cover"
           />
 
           {!ready && (
@@ -264,26 +257,9 @@ export default function CameraCapture({
               {ready ? "Live" : "Offline"}
             </span>
 
-            <div className="flex items-center gap-2">
-              <span className="hidden rounded-full bg-black/35 px-3.5 py-1.5 font-mono text-label text-white/70 backdrop-blur-md sm:block">
-                {FRAME_COUNT} frames · {FRAME_GAP} ms
-              </span>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setFacingMode((current) =>
-                    current === "user" ? "environment" : "user"
-                  )
-                }
-                disabled={busy}
-                aria-label="Flip camera"
-                className="flex items-center gap-2 rounded-full bg-black/35 px-3.5 py-1.5 text-label font-medium text-white backdrop-blur-md transition-colors duration-200 hover:bg-black/55 disabled:opacity-40"
-              >
-                <span aria-hidden>↻</span>
-                {facingMode === "user" ? "Rear" : "Front"}
-              </button>
-            </div>
+            <span className="hidden rounded-full bg-black/35 px-3.5 py-1.5 font-mono text-label text-white/70 backdrop-blur-md sm:block">
+              {FRAME_COUNT} frames · {FRAME_GAP} ms
+            </span>
           </div>
 
           {countIn > 0 && (
