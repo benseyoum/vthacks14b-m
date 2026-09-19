@@ -3,7 +3,6 @@
 import { useEffect, useRef } from "react";
 
 import SignalTrace from "@/components/SignalTrace";
-import { isSpeechSupported } from "@/lib/speech";
 
 export type Utterance = {
   id: number;
@@ -15,6 +14,7 @@ type Props = {
   lines: Utterance[];
   speaking: boolean;
   canSpeak: boolean;
+  speechEngine: "elevenlabs" | "browser";
   onRead: () => void;
   onStop: () => void;
   onClear: () => void;
@@ -28,6 +28,7 @@ export default function Transcript({
   lines,
   speaking,
   canSpeak,
+  speechEngine,
   onRead,
   onStop,
   onClear,
@@ -44,7 +45,7 @@ export default function Transcript({
         <button
           type="button"
           onClick={speaking ? onStop : onRead}
-          disabled={!canSpeak || !isSpeechSupported()}
+          disabled={!canSpeak}
           className="h-12 rounded-full bg-panel px-6 text-body font-semibold text-white transition-transform duration-200 hover:scale-[1.02] active:scale-[0.99] disabled:pointer-events-none disabled:bg-surface-sunk disabled:text-text-soft"
         >
           {speaking ? "Stop" : "Speak this aloud"}
@@ -53,7 +54,7 @@ export default function Transcript({
         <button
           type="button"
           onClick={onRead}
-          disabled={!canSpeak || speaking || !isSpeechSupported()}
+          disabled={!canSpeak || speaking}
           className="h-12 rounded-full bg-surface-sunk px-6 text-body font-semibold text-text transition-colors duration-200 hover:bg-line disabled:pointer-events-none disabled:text-text-soft"
         >
           Say it again
@@ -67,6 +68,10 @@ export default function Transcript({
         >
           Clear
         </button>
+
+        <span className="rounded-full bg-surface-sunk px-3 py-1.5 font-mono text-[0.65rem] uppercase tracking-[0.12em] text-text-soft">
+          Voice · {speechEngine === "elevenlabs" ? "ElevenLabs" : "device fallback"}
+        </span>
 
         <SignalTrace className="ml-auto hidden h-6 w-32 sm:block" dark />
       </div>
