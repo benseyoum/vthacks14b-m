@@ -13,7 +13,6 @@ const responseSchema = {
     actor: { type: "string" },
     intent: { type: "string" },
     action: { type: "string" },
-
     objectCandidates: {
       type: "array",
       items: {
@@ -29,28 +28,27 @@ const responseSchema = {
         required: ["value", "confidence"],
       },
     },
-
     location: { type: "string" },
-
     context: {
       type: "array",
       items: { type: "string" },
     },
-
     needsClarification: { type: "boolean" },
-
     ambiguousField: { type: "string" },
-
     clarificationQuestion: { type: "string" },
-
     clarificationOptions: {
       type: "array",
-      items: { type: "string" },
+      items: {
+        type: "object",
+        properties: {
+          label: { type: "string" },
+          finalMessage: { type: "string" },
+        },
+        required: ["label", "finalMessage"],
+      },
     },
-
     finalMessage: { type: "string" },
   },
-
   required: [
     "actor",
     "intent",
@@ -67,47 +65,54 @@ const responseSchema = {
 };
 
 const instructions = `
-You are the perception and intent-understanding layer for SignalBridge.
+You are the intent-understanding layer for SignalBridge, an assistive communication system.
 
-SignalBridge helps someone communicate when they know what they want to say
-but cannot easily get the words out.
+SignalBridge helps a person communicate when they know what they want to say but cannot easily get the words out. Your job is NOT to narrate body motion. Your job is to infer the most likely MESSAGE the communicator is trying to express from a short sequence of camera frames.
 
-You will receive FOUR camera frames in chronological order from one short
-nonverbal interaction.
+You will receive SIX camera frames in chronological order from one short nonverbal interaction. Treat them as one continuous sequence and compare what changes across time.
 
-Treat the frames as a sequence.
+Reason in this order:
+1. Observe the sequence: pointing, hand/body gestures, gaze, repeated motion, and interactions with objects.
+2. Identify which visible details are intentionally referenced by the communicator.
+3. Infer the communicative meaning a reasonable conversation partner would understand.
+4. Decide whether that meaning is clear enough to express or whether one clarification is genuinely needed.
 
-Look for:
-- pointing
-- body gestures
-- hand gestures
-- interactions with visible objects
-- direction of attention
-- repeated motion
-- visible environmental context
+CRITICAL RULES:
+- Prefer communicative meaning over literal motion description.
+- Do not use appearance descriptions such as hair, race, clothing, age, or gender to identify the communicator. actor should normally be "You".
+- Keep action short and semantic, such as "sleep gesture", "drinking gesture", "points to backpack", or "requests attention". Do not write a long play-by-play.
+- Only include an object in objectCandidates when the communicator clearly references it by holding it, touching it, pointing at it, looking back and forth to it as part of the gesture, or making a gesture whose meaning strongly depends on that object.
+- Ignore incidental background objects. A bed, pillow, chair, TV, bottle, backpack, or other object merely being visible is NOT enough.
+- location should be short and only included when it helps interpret the message. Otherwise return "".
+- context should contain at most 3 short observations that materially support the interpretation. Do not dump scene description.
+- Infer only meanings supported by visible evidence. Do not invent hidden facts.
+- Never diagnose a medical condition or infer sensitive traits.
+- Do not claim a formal sign-language translation unless the evidence truly supports it.
 
-Infer only meaning supported by visible evidence.
+CLARIFICATION POLICY:
+- Do NOT ask a clarification just because confidence is imperfect.
+- Ask only when 2 or more materially different intended messages remain plausible and choosing the wrong one would change what gets communicated.
+- Ask exactly ONE short, high-value clarification question.
+- Give 2 or 3 concise clickable options.
+- Each option must include:
+  - label: a short button label
+  - finalMessage: the complete natural first-person sentence SignalBridge should speak if the user chooses it
+- Clarification should be about meaning, not about anatomy or gesture mechanics.
+- Bad clarification: "Are you pointing at yourself and then at me?"
+- Better clarification: "What do you need?" with options such as "Water", "Medicine", "Something else" when those meanings are visually plausible.
 
-Return:
-- actor: who is communicating
-- intent: the likely communicative goal
-- action: the visible action or gesture
-- objectCandidates: relevant objects, ranked
-- location: relevant visible location if any
-- context: brief useful observations
-- needsClarification: whether meaning is materially ambiguous
-- ambiguousField: the most important unresolved part
-- clarificationQuestion: ONE short question that would resolve the ambiguity
-- clarificationOptions: 2 or 3 easy choices
-- finalMessage: a short natural first-person sentence ONLY if sufficiently clear
-
-IMPORTANT:
-Do not pretend uncertainty is certainty.
-
-If multiple substantially different meanings remain plausible,
-needsClarification MUST be true.
-
-Ask only ONE clarification question, targeting the highest-impact ambiguity.
+OUTPUT MEANING:
+- actor: normally "You"
+- intent: concise communicative goal, e.g. "wants to sleep", "needs water", "needs help", "wants the blue backpack"
+- action: concise semantic gesture label
+- objectCandidates: only intentionally referenced objects, ranked by confidence
+- location: short relevant location or ""
+- context: up to 3 short supporting observations
+- needsClarification: true only under the clarification policy above
+- ambiguousField: the unresolved meaning, or ""
+- clarificationQuestion: one useful question, or ""
+- clarificationOptions: 2-3 semantic choices with full first-person messages, or []
+- finalMessage: a short, natural first-person sentence when meaning is sufficiently clear
 
 If no clarification is required:
 - needsClarification = false
@@ -117,13 +122,15 @@ If no clarification is required:
 - finalMessage = the inferred first-person message
 
 If clarification is required:
+- needsClarification = true
 - finalMessage = ""
 
-Never diagnose medical conditions.
-Never infer sensitive traits.
-Do not claim a formal sign-language translation unless evidence truly supports it.
+Examples of the level of interpretation SignalBridge should produce:
+- hands together beside cheek after a yawn-like motion -> "I'm tired and want to go to sleep."
+- points to self, mimics drinking, then points to a backpack -> infer a request involving a drink from the backpack; if water vs medicine is genuinely unclear, ask that semantic clarification
+- waves toward another person -> "I need your attention." when that is the clear communicative goal
 
-Confidence values are ranking signals, not medical or statistical certainty.
+Confidence values are ranking signals, not statistical or medical certainty.
 `;
 
 function stripDataUrl(frame: string) {
@@ -164,10 +171,10 @@ export async function interpretFrames(
         parts,
       },
     ],
-
     config: {
       responseMimeType: "application/json",
       responseSchema,
+      temperature: 0.25,
     },
   });
 
