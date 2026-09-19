@@ -3,8 +3,10 @@
 import { useState } from "react";
 
 import CameraCapture from "@/components/CameraCapture";
+import { speakMessage } from "@/lib/speech";
 
 import type {
+  ClarificationOption,
   SignalInterpretation,
 } from "@/types/signalbridge";
 
@@ -23,9 +25,7 @@ function Field({
 
       <p className="mt-2 text-lg">
         {value || (
-          <span className="text-zinc-600">
-            Not clear
-          </span>
+          <span className="text-zinc-600">Not relevant</span>
         )}
       </p>
     </div>
@@ -34,10 +34,8 @@ function Field({
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
-
   const [result, setResult] =
     useState<SignalInterpretation | null>(null);
-
   const [error, setError] = useState("");
 
   async function interpret(frames: string[]) {
@@ -48,14 +46,10 @@ export default function Home() {
     try {
       const response = await fetch("/api/interpret", {
         method: "POST",
-
         headers: {
           "Content-Type": "application/json",
         },
-
-        body: JSON.stringify({
-          frames,
-        }),
+        body: JSON.stringify({ frames }),
       });
 
       const data = await response.json();
@@ -66,7 +60,17 @@ export default function Home() {
         );
       }
 
-      setResult(data.interpretation);
+      const interpretation =
+        data.interpretation as SignalInterpretation;
+
+      setResult(interpretation);
+
+      if (
+        !interpretation.needsClarification &&
+        interpretation.finalMessage
+      ) {
+        speakMessage(interpretation.finalMessage);
+      }
     } catch (e) {
       setError(
         e instanceof Error
@@ -78,14 +82,27 @@ export default function Home() {
     }
   }
 
+  function resolveClarification(option: ClarificationOption) {
+    if (!result) return;
+
+    const resolved: SignalInterpretation = {
+      ...result,
+      needsClarification: false,
+      ambiguousField: "",
+      clarificationQuestion: "",
+      clarificationOptions: [],
+      finalMessage: option.finalMessage,
+    };
+
+    setResult(resolved);
+    speakMessage(option.finalMessage);
+  }
+
   return (
     <main className="min-h-screen bg-[#08090c] text-white">
       <div className="mx-auto max-w-7xl px-5 py-8 md:px-8 md:py-12">
-
         <header className="mb-10 border-b border-white/10 pb-8">
-
           <div className="flex items-center justify-between">
-
             <div className="text-sm font-semibold uppercase tracking-[0.28em] text-cyan-400">
               SignalBridge
             </div>
@@ -93,7 +110,6 @@ export default function Home() {
             <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm text-emerald-300">
               ● Ready
             </div>
-
           </div>
 
           <h1 className="mt-6 max-w-4xl text-5xl font-semibold tracking-tight md:text-7xl">
@@ -104,11 +120,9 @@ export default function Home() {
             When you know what you want to say,
             but you can&apos;t get the words out.
           </p>
-
         </header>
 
         <div className="grid gap-8 lg:grid-cols-[1.08fr_.92fr]">
-
           <section>
             <CameraCapture
               loading={loading}
@@ -117,7 +131,6 @@ export default function Home() {
           </section>
 
           <section className="min-h-[520px] rounded-3xl border border-white/10 bg-[#101116] p-6 md:p-8">
-
             <p className="text-xs font-semibold uppercase tracking-[0.23em] text-zinc-500">
               What I understand
             </p>
@@ -128,7 +141,6 @@ export default function Home() {
 
             {!result && !loading && !error && (
               <div className="mt-8 flex min-h-[390px] items-center justify-center rounded-2xl border border-dashed border-white/10 p-8 text-center leading-7 text-zinc-500">
-
                 <p>
                   Communicate using gestures,
                   objects, and context.
@@ -137,26 +149,22 @@ export default function Home() {
                   SignalBridge will build the
                   meaning here.
                 </p>
-
               </div>
             )}
 
             {loading && (
               <div className="flex min-h-[390px] items-center justify-center text-center">
-
                 <div>
                   <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-zinc-700 border-t-cyan-400" />
 
                   <p className="mt-5 text-lg font-medium">
-                    Reading the interaction...
+                    Understanding the message...
                   </p>
 
                   <p className="mt-2 text-sm text-zinc-500">
-                    Comparing gesture, object,
-                    and context.
+                    Reading the gesture as one sequence.
                   </p>
                 </div>
-
               </div>
             )}
 
@@ -168,9 +176,7 @@ export default function Home() {
 
             {result && (
               <div className="mt-7 space-y-5">
-
                 <div className="grid grid-cols-2 gap-3">
-
                   <Field
                     label="Person"
                     value={result.actor}
@@ -190,20 +196,17 @@ export default function Home() {
                     label="Location"
                     value={result.location}
                   />
-
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
-
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-                    Objects
+                    Referenced objects
                   </p>
 
                   <div className="mt-3 space-y-3">
-
                     {result.objectCandidates.length === 0 && (
                       <p className="text-zinc-600">
-                        No relevant object identified
+                        No referenced object identified
                       </p>
                     )}
 
@@ -213,10 +216,7 @@ export default function Home() {
                           key={`${candidate.value}-${index}`}
                           className="flex items-center justify-between"
                         >
-
-                          <span>
-                            {candidate.value}
-                          </span>
+                          <span>{candidate.value}</span>
 
                           <span className="text-sm text-zinc-500">
                             {Math.round(
@@ -224,18 +224,14 @@ export default function Home() {
                             )}
                             %
                           </span>
-
                         </div>
                       )
                     )}
-
                   </div>
                 </div>
 
                 {result.needsClarification ? (
-
                   <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-5">
-
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300">
                       Clarification needed
                     </p>
@@ -245,26 +241,24 @@ export default function Home() {
                     </p>
 
                     <div className="mt-4 flex flex-wrap gap-2">
-
                       {result.clarificationOptions.map(
                         (option) => (
-                          <div
-                            key={option}
-                            className="rounded-xl border border-amber-200/20 bg-black/20 px-4 py-2"
+                          <button
+                            key={`${option.label}-${option.finalMessage}`}
+                            type="button"
+                            onClick={() =>
+                              resolveClarification(option)
+                            }
+                            className="rounded-xl border border-amber-200/25 bg-black/20 px-4 py-2 text-left transition hover:border-amber-200/50 hover:bg-amber-200/10 focus:outline-none focus:ring-2 focus:ring-amber-300/60"
                           >
-                            {option}
-                          </div>
+                            {option.label}
+                          </button>
                         )
                       )}
-
                     </div>
-
                   </div>
-
                 ) : result.finalMessage ? (
-
                   <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-5">
-
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
                       Message
                     </p>
@@ -273,8 +267,16 @@ export default function Home() {
                       “{result.finalMessage}”
                     </p>
 
+                    <button
+                      type="button"
+                      onClick={() =>
+                        speakMessage(result.finalMessage)
+                      }
+                      className="mt-4 rounded-xl border border-cyan-200/20 bg-black/20 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-200/10"
+                    >
+                      Speak again
+                    </button>
                   </div>
-
                 ) : null}
 
                 {result.context.length > 0 && (
@@ -282,12 +284,9 @@ export default function Home() {
                     {result.context.join(" • ")}
                   </p>
                 )}
-
               </div>
             )}
-
           </section>
-
         </div>
       </div>
     </main>
