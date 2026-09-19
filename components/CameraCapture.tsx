@@ -7,6 +7,8 @@ type Props = {
   onCapture: (frames: string[]) => Promise<void>;
 };
 
+type FacingMode = "user" | "environment";
+
 const sleep = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -16,20 +18,37 @@ export default function CameraCapture({
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [capturing, setCapturing] = useState(false);
+  const [facingMode, setFacingMode] = useState<FacingMode>("user");
 
   useEffect(() => {
-    let stream: MediaStream | null = null;
+    let cancelled = false;
 
     async function startCamera() {
+      setReady(false);
+      setError("");
+
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: facingMode },
+          },
           audio: false,
         });
+
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        streamRef.current = stream;
 
         if (!videoRef.current) return;
 
@@ -38,7 +57,7 @@ export default function CameraCapture({
         setReady(true);
       } catch {
         setError(
-          "Camera permission failed. Allow camera access in Chrome and refresh."
+          "Camera permission failed or this camera is unavailable. Allow camera access and try again."
         );
       }
     }
@@ -46,9 +65,19 @@ export default function CameraCapture({
     startCamera();
 
     return () => {
-      stream?.getTracks().forEach((track) => track.stop());
+      cancelled = true;
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     };
-  }, []);
+  }, [facingMode]);
+
+  function flipCamera() {
+    if (capturing || loading) return;
+
+    setFacingMode((current) =>
+      current === "user" ? "environment" : "user"
+    );
+  }
 
   function takeFrame() {
     const video = videoRef.current;
@@ -115,7 +144,9 @@ export default function CameraCapture({
           autoPlay
           muted
           playsInline
-          className="aspect-video w-full object-cover"
+          className={`aspect-video w-full object-cover ${
+            facingMode === "user" ? "scale-x-[-1]" : ""
+          }`}
         />
 
         {!ready && !error && (
@@ -128,6 +159,16 @@ export default function CameraCapture({
           <span className="mr-2 text-red-400">●</span>
           Live
         </div>
+
+        <button
+          type="button"
+          onClick={flipCamera}
+          disabled={!ready || loading || capturing}
+          className="absolute right-4 top-4 rounded-full border border-white/15 bg-black/60 px-4 py-2 text-sm font-medium text-white backdrop-blur transition hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-40"
+          aria-label="Flip camera"
+        >
+          ↻ {facingMode === "user" ? "Rear camera" : "Front camera"}
+        </button>
 
         {capturing && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/35">
