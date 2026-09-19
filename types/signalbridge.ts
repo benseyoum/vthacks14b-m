@@ -3,6 +3,11 @@ export type Candidate = {
   confidence: number;
 };
 
+export type ClarificationOption = {
+  label: string;
+  finalMessage: string;
+};
+
 export type SignalInterpretation = {
   actor: string;
   intent: string;
@@ -13,6 +18,6 @@ export type SignalInterpretation = {
   needsClarification: boolean;
   ambiguousField: string;
   clarificationQuestion: string;
-  clarificationOptions: string[];
+  clarificationOptions: ClarificationOption[];
   finalMessage: string;
 };
