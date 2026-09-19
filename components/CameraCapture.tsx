@@ -35,7 +35,6 @@ export default function CameraCapture({
 
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
-
         setReady(true);
       } catch {
         setError(
@@ -59,7 +58,7 @@ export default function CameraCapture({
       throw new Error("Camera is not ready.");
     }
 
-    const targetWidth = 720;
+    const targetWidth = 640;
     const scale = targetWidth / video.videoWidth;
 
     canvas.width = targetWidth;
@@ -71,15 +70,9 @@ export default function CameraCapture({
       throw new Error("Could not capture camera frame.");
     }
 
-    ctx.drawImage(
-      video,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    return canvas.toDataURL("image/jpeg", 0.72);
+    return canvas.toDataURL("image/jpeg", 0.68);
   }
 
   async function captureSequence() {
@@ -91,14 +84,14 @@ export default function CameraCapture({
     try {
       const frames: string[] = [];
 
-      // Small delay so you have time to begin the gesture.
-      await sleep(700);
+      // Gives the communicator a beat to begin, then samples the full gesture.
+      await sleep(500);
 
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 6; i++) {
         frames.push(takeFrame());
 
-        if (i < 3) {
-          await sleep(650);
+        if (i < 5) {
+          await sleep(500);
         }
       }
 
@@ -145,10 +138,7 @@ export default function CameraCapture({
         )}
       </div>
 
-      <canvas
-        ref={canvasRef}
-        className="hidden"
-      />
+      <canvas ref={canvasRef} className="hidden" />
 
       {error && (
         <div className="mt-4 rounded-2xl border border-red-400/20 bg-red-400/10 p-4 text-sm text-red-200">
@@ -169,7 +159,7 @@ export default function CameraCapture({
       </button>
 
       <p className="mt-3 text-center text-xs text-zinc-500">
-        Perform your gesture after pressing the button.
+        Perform the full gesture after pressing the button.
       </p>
     </div>
   );
