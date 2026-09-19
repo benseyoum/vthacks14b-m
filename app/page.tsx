@@ -43,12 +43,11 @@ export default function Home() {
   const message =
     result && !result.needsClarification ? result.finalMessage : "";
 
-  const { speaking, spokenWord, read, stop, reset } = useSpeech(message);
+  const { speaking, spokenWord, speechEngine, read, stop, reset } =
+    useSpeech(message);
 
   const logged = useRef("");
 
-  // Every resolved sentence joins the transcript, so a demo reads as one
-  // conversation rather than a series of disconnected guesses.
   useEffect(() => {
     if (!message.trim() || logged.current === message) return;
 
@@ -75,15 +74,10 @@ export default function Home() {
     try {
       const response = await fetch("/api/interpret", {
         method: "POST",
-
         headers: {
           "Content-Type": "application/json",
         },
-
-        body: JSON.stringify({
-          frames,
-          meta,
-        }),
+        body: JSON.stringify({ frames, meta }),
       });
 
       const data = await response.json();
@@ -123,9 +117,7 @@ export default function Home() {
     <div className="mx-auto w-full max-w-[72rem] px-4 pb-24 md:px-8">
       <header className="sticky top-0 z-50 -mx-4 mb-6 flex items-center justify-between gap-4 bg-ground/80 px-4 py-3 backdrop-blur-xl md:-mx-8 md:px-8">
         <p className="flex items-center gap-2 text-[0.9375rem] font-semibold tracking-tight">
-          <span aria-hidden className="font-mono text-accent">
-            ıllı
-          </span>
+          <span aria-hidden className="font-mono text-accent">ıllı</span>
           SignalBridge
         </p>
 
@@ -142,9 +134,7 @@ export default function Home() {
         </nav>
 
         <span className="flex items-center gap-2 rounded-full bg-surface px-3.5 py-1.5 text-label font-medium shadow-card">
-          <span aria-hidden className={speaking ? "text-live" : "text-accent"}>
-            ●
-          </span>
+          <span aria-hidden className={speaking ? "text-live" : "text-accent"}>●</span>
           {speaking ? "Speaking" : "Ready"}
         </span>
       </header>
@@ -157,7 +147,6 @@ export default function Home() {
         a sentence you can check, and speaks it into the room.
       </p>
 
-      {/* The viewport is the page. Only the caption sits on the feed. */}
       <CameraCapture loading={loading} onCapture={interpret}>
         <CaptionOverlay
           loading={loading}
@@ -177,6 +166,7 @@ export default function Home() {
           lines={transcript}
           speaking={speaking}
           canSpeak={Boolean(message)}
+          speechEngine={speechEngine}
           onRead={read}
           onStop={stop}
           onClear={clearAll}
@@ -184,7 +174,6 @@ export default function Home() {
       </div>
 
       <section className="mt-6 grid gap-6 lg:grid-cols-[1fr_1.25fr]">
-        {/* Recorded readings — both outcomes, with no camera and no network. */}
         <div className="rounded-card bg-surface p-4 shadow-card md:p-5">
           <p className="px-1 pb-3 text-label font-medium">Recorded readings</p>
 
@@ -227,9 +216,7 @@ export default function Home() {
       </section>
 
       <section id="reads" className="mt-24 scroll-mt-24">
-        <h2 className="text-label font-medium text-text-soft">
-          How it reads you
-        </h2>
+        <h2 className="text-label font-medium text-text-soft">How it reads you</h2>
 
         <div className="mt-4 grid gap-4 md:grid-cols-3">
           {STEPS.map((step, index) => (
@@ -240,9 +227,7 @@ export default function Home() {
               <p className="font-mono text-label text-accent">
                 {String(index + 1).padStart(3, "0")}
               </p>
-
               <h3 className="mt-2 text-headline">{step.title}</h3>
-
               <p className="mt-2 text-body text-text-soft">{step.body}</p>
             </div>
           ))}
@@ -271,9 +256,7 @@ export default function Home() {
       </section>
 
       <section id="access" className="reveal mt-24 scroll-mt-24">
-        <h2 className="text-label font-medium text-text-soft">
-          Who this is for
-        </h2>
+        <h2 className="text-label font-medium text-text-soft">Who this is for</h2>
 
         <div className="mt-4 rounded-card bg-surface p-8 shadow-card md:p-12">
           <p className="max-w-3xl text-headline">
