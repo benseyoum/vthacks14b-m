@@ -1,69 +1,295 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+
+import CameraCapture from "@/components/CameraCapture";
+
+import type {
+  SignalInterpretation,
+} from "@/types/signalbridge";
+
+function Field({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+        {label}
+      </p>
+
+      <p className="mt-2 text-lg">
+        {value || (
+          <span className="text-zinc-600">
+            Not clear
+          </span>
+        )}
+      </p>
+    </div>
+  );
+}
 
 export default function Home() {
+  const [loading, setLoading] = useState(false);
+
+  const [result, setResult] =
+    useState<SignalInterpretation | null>(null);
+
+  const [error, setError] = useState("");
+
+  async function interpret(frames: string[]) {
+    setLoading(true);
+    setError("");
+    setResult(null);
+
+    try {
+      const response = await fetch("/api/interpret", {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify({
+          frames,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || "Interpretation failed."
+        );
+      }
+
+      setResult(data.interpretation);
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Something went wrong."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
+    <main className="min-h-screen bg-[#08090c] text-white">
+      <div className="mx-auto max-w-7xl px-5 py-8 md:px-8 md:py-12">
+
+        <header className="mb-10 border-b border-white/10 pb-8">
+
+          <div className="flex items-center justify-between">
+
+            <div className="text-sm font-semibold uppercase tracking-[0.28em] text-cyan-400">
+              SignalBridge
+            </div>
+
+            <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-4 py-2 text-sm text-emerald-300">
+              ● Ready
+            </div>
+
+          </div>
+
+          <h1 className="mt-6 max-w-4xl text-5xl font-semibold tracking-tight md:text-7xl">
+            Turn intent into words.
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+
+          <p className="mt-5 max-w-2xl text-lg leading-8 text-zinc-400">
+            When you know what you want to say,
+            but you can&apos;t get the words out.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+
+        </header>
+
+        <div className="grid gap-8 lg:grid-cols-[1.08fr_.92fr]">
+
+          <section>
+            <CameraCapture
+              loading={loading}
+              onCapture={interpret}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+          </section>
+
+          <section className="min-h-[520px] rounded-3xl border border-white/10 bg-[#101116] p-6 md:p-8">
+
+            <p className="text-xs font-semibold uppercase tracking-[0.23em] text-zinc-500">
+              What I understand
+            </p>
+
+            <h2 className="mt-2 text-2xl font-semibold">
+              Intent interpretation
+            </h2>
+
+            {!result && !loading && !error && (
+              <div className="mt-8 flex min-h-[390px] items-center justify-center rounded-2xl border border-dashed border-white/10 p-8 text-center leading-7 text-zinc-500">
+
+                <p>
+                  Communicate using gestures,
+                  objects, and context.
+                  <br />
+                  <br />
+                  SignalBridge will build the
+                  meaning here.
+                </p>
+
+              </div>
+            )}
+
+            {loading && (
+              <div className="flex min-h-[390px] items-center justify-center text-center">
+
+                <div>
+                  <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-zinc-700 border-t-cyan-400" />
+
+                  <p className="mt-5 text-lg font-medium">
+                    Reading the interaction...
+                  </p>
+
+                  <p className="mt-2 text-sm text-zinc-500">
+                    Comparing gesture, object,
+                    and context.
+                  </p>
+                </div>
+
+              </div>
+            )}
+
+            {error && (
+              <div className="mt-8 rounded-2xl border border-red-400/20 bg-red-400/10 p-5 text-red-200">
+                {error}
+              </div>
+            )}
+
+            {result && (
+              <div className="mt-7 space-y-5">
+
+                <div className="grid grid-cols-2 gap-3">
+
+                  <Field
+                    label="Person"
+                    value={result.actor}
+                  />
+
+                  <Field
+                    label="Intent"
+                    value={result.intent}
+                  />
+
+                  <Field
+                    label="Action"
+                    value={result.action}
+                  />
+
+                  <Field
+                    label="Location"
+                    value={result.location}
+                  />
+
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4">
+
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Objects
+                  </p>
+
+                  <div className="mt-3 space-y-3">
+
+                    {result.objectCandidates.length === 0 && (
+                      <p className="text-zinc-600">
+                        No relevant object identified
+                      </p>
+                    )}
+
+                    {result.objectCandidates.map(
+                      (candidate, index) => (
+                        <div
+                          key={`${candidate.value}-${index}`}
+                          className="flex items-center justify-between"
+                        >
+
+                          <span>
+                            {candidate.value}
+                          </span>
+
+                          <span className="text-sm text-zinc-500">
+                            {Math.round(
+                              candidate.confidence * 100
+                            )}
+                            %
+                          </span>
+
+                        </div>
+                      )
+                    )}
+
+                  </div>
+                </div>
+
+                {result.needsClarification ? (
+
+                  <div className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-5">
+
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-300">
+                      Clarification needed
+                    </p>
+
+                    <p className="mt-3 text-xl font-medium">
+                      {result.clarificationQuestion}
+                    </p>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+
+                      {result.clarificationOptions.map(
+                        (option) => (
+                          <div
+                            key={option}
+                            className="rounded-xl border border-amber-200/20 bg-black/20 px-4 py-2"
+                          >
+                            {option}
+                          </div>
+                        )
+                      )}
+
+                    </div>
+
+                  </div>
+
+                ) : result.finalMessage ? (
+
+                  <div className="rounded-2xl border border-cyan-300/20 bg-cyan-300/10 p-5">
+
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+                      Message
+                    </p>
+
+                    <p className="mt-3 text-2xl font-semibold leading-snug">
+                      “{result.finalMessage}”
+                    </p>
+
+                  </div>
+
+                ) : null}
+
+                {result.context.length > 0 && (
+                  <p className="text-sm leading-6 text-zinc-500">
+                    {result.context.join(" • ")}
+                  </p>
+                )}
+
+              </div>
+            )}
+
+          </section>
+
         </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
