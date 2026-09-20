@@ -23,7 +23,7 @@ type ValidationSample = {
 };
 
 const MAX_FRAMES = 24;
-const MAX_FRAME_BASE64_LENGTH = 180_000;
+const MAX_FRAME_BASE64_LENGTH = 260_000;
 
 let active = false;
 
