@@ -19,6 +19,9 @@ const NAV = [
   { label: "Access", href: "#access" },
 ];
 
+/** Which of the three rooms this install is sitting in: bedside, ward, lab. */
+const ROOM = process.env.NEXT_PUBLIC_SIGNALBRIDGE_ROOM || "bedside";
+
 const STEPS = [
   {
     title: "See",
@@ -47,6 +50,17 @@ export default function Home() {
 
   const logged = useRef("");
 
+  // How the sentence was reached, kept for the row that gets written: did the
+  // model have to ask, which option was picked, and how long the read took.
+  const sessionId = useRef("");
+  const clarified = useRef(false);
+  const chosenOption = useRef<string | null>(null);
+  const latencyMs = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!sessionId.current) sessionId.current = crypto.randomUUID();
+  }, []);
+
   // Every resolved sentence joins the transcript, so a demo reads as one
   // conversation rather than a series of disconnected guesses.
   useEffect(() => {
@@ -65,12 +79,38 @@ export default function Home() {
         }),
       },
     ]);
-  }, [message]);
+
+    // Fire and forget into Tiger. The row records what was said; it is not a
+    // step in saying it, so nothing here may delay or break the caption.
+    if (result) {
+      void fetch("/api/readings", {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify({
+          interpretation: result,
+          sessionId: sessionId.current,
+          room: ROOM,
+          neededClarification: clarified.current,
+          chosenOption: chosenOption.current,
+          latencyMs: latencyMs.current,
+        }),
+      }).catch(() => {});
+    }
+  }, [message, result]);
 
   async function interpret(frames: string[], meta: FrameMeta[]) {
     setLoading(true);
     setError("");
     setResult(null);
+
+    clarified.current = false;
+    chosenOption.current = null;
+
+    const started = performance.now();
 
     try {
       const response = await fetch("/api/interpret", {
@@ -92,6 +132,8 @@ export default function Home() {
         throw new Error(data.error || "Interpretation failed.");
       }
 
+      latencyMs.current = Math.round(performance.now() - started);
+
       setResult(data.interpretation);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
@@ -105,6 +147,11 @@ export default function Home() {
     setLoading(false);
     reset();
     logged.current = "";
+
+    clarified.current = false;
+    chosenOption.current = null;
+    latencyMs.current = null;
+
     setResult(next);
   }
 
@@ -164,11 +211,14 @@ export default function Home() {
           error={error}
           result={result}
           spokenWord={spokenWord}
-          onChoose={(option) =>
+          onChoose={(option) => {
+            clarified.current = true;
+            chosenOption.current = option.label;
+
             setResult((current) =>
               current ? resolveWithChoice(current, option) : current
-            )
-          }
+            );
+          }}
         />
       </CameraCapture>
 
