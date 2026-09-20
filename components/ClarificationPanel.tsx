@@ -14,12 +14,20 @@ type Props = {
  * The most important moment in the product.
  *
  * When two readings are both plausible the model refuses to guess and asks one
- * question instead. That refusal is the feature, so it reads as the system
- * working — not as an error.
+ * question instead. If part of the message is already clear, show and speak it
+ * first so clarification adds detail rather than silencing the communicator.
  */
 export default function ClarificationPanel({ result, onChoose }: Props) {
+  const knownMessage = result.finalMessage.trim();
+
   return (
     <div className="rise">
+      {knownMessage && (
+        <p className="mb-2 text-body font-medium text-white/70">
+          {knownMessage}
+        </p>
+      )}
+
       <p className="text-overlay text-white">
         {result.clarificationQuestion}
       </p>
