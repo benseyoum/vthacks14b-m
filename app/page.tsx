@@ -30,7 +30,7 @@ const STEPS = [
   },
   {
     title: "Confirm",
-    body: "If two readings are both plausible, it asks one question instead of guessing. Then it says the sentence out loud.",
+    body: "If two readings are both plausible, it says what it already knows, asks one question instead of guessing, then says the resolved sentence out loud.",
   },
 ];
 
@@ -40,31 +40,44 @@ export default function Home() {
   const [error, setError] = useState("");
   const [transcript, setTranscript] = useState<Utterance[]>([]);
 
-  const message =
-    result && !result.needsClarification ? result.finalMessage : "";
+  const resolvedMessage =
+    result && !result.needsClarification ? result.finalMessage.trim() : "";
+
+  // When Gemini needs one detail, do not silence the person while we wait.
+  // Speak the part already established, then immediately ask the one question.
+  // After the person chooses an option, resolvedMessage changes to the complete
+  // sentence and ElevenLabs says it again with the missing detail included.
+  const speechMessage = result
+    ? result.needsClarification
+      ? [result.finalMessage, result.clarificationQuestion]
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .join(" ")
+      : result.finalMessage.trim()
+    : "";
 
   const { speaking, spokenWord, speechEngine, read, stop, reset } =
-    useSpeech(message);
+    useSpeech(speechMessage);
 
   const logged = useRef("");
 
   useEffect(() => {
-    if (!message.trim() || logged.current === message) return;
+    if (!resolvedMessage || logged.current === resolvedMessage) return;
 
-    logged.current = message;
+    logged.current = resolvedMessage;
 
     setTranscript((previous) => [
       ...previous,
       {
         id: Date.now(),
-        text: message,
+        text: resolvedMessage,
         at: new Date().toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
         }),
       },
     ]);
-  }, [message]);
+  }, [resolvedMessage]);
 
   async function interpret(frames: string[], meta: FrameMeta[]) {
     setLoading(true);
@@ -165,7 +178,7 @@ export default function Home() {
         <Transcript
           lines={transcript}
           speaking={speaking}
-          canSpeak={Boolean(message)}
+          canSpeak={Boolean(speechMessage)}
           speechEngine={speechEngine}
           onRead={read}
           onStop={stop}
@@ -249,8 +262,9 @@ export default function Home() {
             Most systems pick the likeliest option and present it as certainty.
             Putting words in the mouth of someone who cannot correct you is the
             worst failure this product could have. So when the reading is
-            genuinely ambiguous, SignalBridge stops and asks a single question —
-            and the answer resolves instantly, with no second round trip.
+            genuinely ambiguous, SignalBridge says the part it does know, asks a
+            single question, and the answer resolves instantly with no second
+            model round trip.
           </p>
         </div>
       </section>
