@@ -29,24 +29,22 @@ export const DEMO_CLEAR: SignalInterpretation = {
 };
 
 export const DEMO_AMBIGUOUS: SignalInterpretation = {
-  actor: "The person by the window",
-  intent: "Referring to something across the room",
-  action: "Holds an open hand toward the far side of the room",
-  objectCandidates: [
-    { value: "Window", confidence: 0.54 },
-    { value: "Jacket on the chair", confidence: 0.48 },
-  ],
-  location: "Living room",
+  actor: "You",
+  intent: "Reports chest discomfort",
+  action: "Touches chest and signals discomfort",
+  objectCandidates: [],
+  location: "",
   context: [
-    "The gesture direction covers both the window and the chair.",
-    "No object is held or touched in any frame.",
+    "The chest area is intentionally referenced across multiple frames.",
+    "The broad message is clear, but the quality of the discomfort is not visible.",
   ],
   needsClarification: true,
-  ambiguousField: "objectCandidates",
-  clarificationQuestion: "Which one do you mean?",
+  ambiguousField: "discomfortType",
+  clarificationQuestion: "What type of discomfort?",
   clarificationOptions: [
-    { label: "The window", finalMessage: "Could you open the window?" },
-    { label: "My jacket", finalMessage: "Could you pass me my jacket?" },
+    { label: "Sharp", finalMessage: "I have sharp chest discomfort." },
+    { label: "Pressure", finalMessage: "I feel pressure in my chest." },
+    { label: "Burning", finalMessage: "I have a burning discomfort in my chest." },
   ],
-  finalMessage: "",
+  finalMessage: "I have chest discomfort.",
 };
