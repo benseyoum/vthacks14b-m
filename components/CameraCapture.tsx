@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
+import {
+  startFistWatcher,
+  type FistWatcherState,
+} from "@/lib/fistGesture";
 import { pushSignalEnergy } from "@/lib/signal";
 
 export type FrameMeta = {
@@ -55,17 +59,23 @@ export default function CameraCapture({
   const previousPixels = useRef<Uint8ClampedArray | null>(null);
   const runningRef = useRef(false);
   const latestEnergy = useRef(0);
+  const loadingRef = useRef(loading);
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
   const [capturing, setCapturing] = useState(false);
   const [countIn, setCountIn] = useState(0);
   const [taken, setTaken] = useState(0);
+  const [fistState, setFistState] = useState<FistWatcherState>("loading");
   const [presage, setPresage] = useState<PresageStatus>({
     state: "idle",
     label: "Waiting for capture",
     hint: "Presage checks whether the visual signal is usable before we trust it.",
   });
+
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -249,7 +259,7 @@ export default function CameraCapture({
   }
 
   const captureSequence = useCallback(async () => {
-    if (!ready || loading || runningRef.current) return;
+    if (!ready || loadingRef.current || runningRef.current) return;
 
     runningRef.current = true;
     setCapturing(true);
@@ -319,9 +329,42 @@ export default function CameraCapture({
       setCapturing(false);
       setCountIn(0);
     }
-  }, [ready, loading, onCapture]);
+  }, [ready, onCapture]);
 
-  // Space bar triggers capture, so the control does not have to be hit.
+  // Hands-free start: hold a closed fist in the live camera for roughly half a
+  // second. It triggers the same three-count and capture path as the button, so
+  // there is no special-case interpretation behavior.
+  useEffect(() => {
+    if (!ready || !videoRef.current) return;
+
+    let cleanup = () => {};
+    let cancelled = false;
+
+    void startFistWatcher({
+      video: videoRef.current,
+      shouldListen: () =>
+        !cancelled && !loadingRef.current && !runningRef.current,
+      onTrigger: () => {
+        void captureSequence();
+      },
+      onState: (state) => {
+        if (!cancelled) setFistState(state);
+      },
+    }).then((stop) => {
+      if (cancelled) {
+        stop();
+      } else {
+        cleanup = stop;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+  }, [ready, captureSequence]);
+
+  // Space bar remains a backup trigger, so the control does not have to be hit.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.code !== "Space") return;
@@ -348,6 +391,22 @@ export default function CameraCapture({
         : presage.state === "checking"
           ? "text-white"
           : "text-white/40";
+
+  const fistLabel =
+    fistState === "loading"
+      ? "Arming ✊"
+      : fistState === "fist"
+        ? "Fist detected"
+        : fistState === "unavailable"
+          ? "Manual start"
+          : "Show ✊ to start";
+
+  const fistDot =
+    fistState === "fist"
+      ? "text-live"
+      : fistState === "unavailable"
+        ? "text-white/35"
+        : "text-white/70";
 
   return (
     <div>
@@ -376,15 +435,24 @@ export default function CameraCapture({
 
           {/* Top chrome */}
           <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-4 p-5 md:p-6">
-            <span className="flex items-center gap-2 rounded-full bg-black/35 px-3.5 py-1.5 text-label font-medium text-white backdrop-blur-md">
-              <span
-                aria-hidden
-                className={ready ? "text-live" : "text-white/40"}
-              >
-                ●
+            <div className="flex flex-col items-start gap-2">
+              <span className="flex items-center gap-2 rounded-full bg-black/35 px-3.5 py-1.5 text-label font-medium text-white backdrop-blur-md">
+                <span
+                  aria-hidden
+                  className={ready ? "text-live" : "text-white/40"}
+                >
+                  ●
+                </span>
+                {ready ? "Live" : "Offline"}
               </span>
-              {ready ? "Live" : "Offline"}
-            </span>
+
+              {ready && (
+                <span className="flex items-center gap-2 rounded-full bg-black/35 px-3.5 py-1.5 text-label font-medium text-white backdrop-blur-md">
+                  <span aria-hidden className={fistDot}>●</span>
+                  {fistLabel}
+                </span>
+              )}
+            </div>
 
             <div className="flex flex-col items-end gap-2">
               <span className="hidden rounded-full bg-black/35 px-3.5 py-1.5 font-mono text-label text-white/70 backdrop-blur-md sm:block">
@@ -399,9 +467,12 @@ export default function CameraCapture({
           </div>
 
           {countIn > 0 && (
-            <div className="absolute inset-0 flex items-center justify-center bg-panel/60 backdrop-blur-sm">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-panel/60 backdrop-blur-sm">
               <span className="text-[7rem] font-semibold leading-none tabular-nums text-white">
                 {countIn}
+              </span>
+              <span className="rounded-full bg-black/35 px-4 py-1.5 text-label font-medium text-white/80">
+                Release ✊ and make your signal
               </span>
             </div>
           )}
@@ -452,14 +523,28 @@ export default function CameraCapture({
       <canvas ref={canvasRef} className="hidden" />
       <canvas ref={presageCanvasRef} className="hidden" />
 
-      <div className="mt-3 flex items-start justify-between gap-4 rounded-card bg-surface px-4 py-3 shadow-card">
-        <div>
-          <p className="text-label font-semibold text-text">Presage SmartSpectra</p>
-          <p className="mt-0.5 text-label text-text-soft">{presage.hint}</p>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <div className="flex items-start justify-between gap-4 rounded-card bg-surface px-4 py-3 shadow-card">
+          <div>
+            <p className="text-label font-semibold text-text">Hands-free start</p>
+            <p className="mt-0.5 text-label text-text-soft">
+              Hold a closed fist ✊ to start the three-count. Release it, then make your signal.
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-surface-sunk px-3 py-1 font-mono text-[0.625rem] uppercase tracking-wide text-text-soft">
+            camera trigger
+          </span>
         </div>
-        <span className="shrink-0 rounded-full bg-surface-sunk px-3 py-1 font-mono text-[0.625rem] uppercase tracking-wide text-text-soft">
-          capture quality
-        </span>
+
+        <div className="flex items-start justify-between gap-4 rounded-card bg-surface px-4 py-3 shadow-card">
+          <div>
+            <p className="text-label font-semibold text-text">Presage SmartSpectra</p>
+            <p className="mt-0.5 text-label text-text-soft">{presage.hint}</p>
+          </div>
+          <span className="shrink-0 rounded-full bg-surface-sunk px-3 py-1 font-mono text-[0.625rem] uppercase tracking-wide text-text-soft">
+            capture quality
+          </span>
+        </div>
       </div>
 
       <button
@@ -488,7 +573,7 @@ export default function CameraCapture({
         </span>
 
         <span className="font-mono text-label font-normal opacity-70">
-          Space
+          ✊ or Space
         </span>
       </button>
     </div>
