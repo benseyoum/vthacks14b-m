@@ -18,12 +18,30 @@ type Props = {
   children?: ReactNode;
 };
 
+type PresageStatus = {
+  state: "idle" | "checking" | "ready" | "adjust" | "unavailable";
+  label: string;
+  hint: string;
+};
+
 const FRAME_COUNT = 6;
 const FRAME_GAP = 650;
 const COUNT_IN = 700;
+const PRESAGE_WIDTH = 240;
 
 const sleep = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
+
+function bytesToBase64(bytes: Uint8ClampedArray) {
+  let binary = "";
+  const chunkSize = 0x8000;
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+
+  return window.btoa(binary);
+}
 
 export default function CameraCapture({
   loading,
@@ -32,6 +50,7 @@ export default function CameraCapture({
 }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const presageCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const previousPixels = useRef<Uint8ClampedArray | null>(null);
   const runningRef = useRef(false);
@@ -42,6 +61,11 @@ export default function CameraCapture({
   const [capturing, setCapturing] = useState(false);
   const [countIn, setCountIn] = useState(0);
   const [taken, setTaken] = useState(0);
+  const [presage, setPresage] = useState<PresageStatus>({
+    state: "idle",
+    label: "Waiting for capture",
+    hint: "Presage checks whether the visual signal is usable before we trust it.",
+  });
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -151,6 +175,79 @@ export default function CameraCapture({
     return canvas.toDataURL("image/jpeg", 0.82);
   }
 
+  function takePresageFrame() {
+    const video = videoRef.current;
+    const canvas = presageCanvasRef.current;
+
+    if (!video || !canvas || !video.videoWidth) {
+      throw new Error("Camera is not ready for Presage.");
+    }
+
+    const scale = PRESAGE_WIDTH / video.videoWidth;
+    const height = Math.max(1, Math.round(video.videoHeight * scale));
+
+    canvas.width = PRESAGE_WIDTH;
+    canvas.height = height;
+
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Could not prepare Presage frame.");
+
+    ctx.drawImage(video, 0, 0, PRESAGE_WIDTH, height);
+    const image = ctx.getImageData(0, 0, PRESAGE_WIDTH, height);
+
+    return {
+      frame: bytesToBase64(image.data),
+      width: PRESAGE_WIDTH,
+      height,
+      stride: PRESAGE_WIDTH * 4,
+    };
+  }
+
+  async function checkWithPresage(
+    frames: string[],
+    width: number,
+    height: number,
+    stride: number
+  ) {
+    try {
+      const response = await fetch("/api/presage", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ frames, width, height, stride }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Presage check unavailable.");
+      }
+
+      if (data.ready) {
+        setPresage({
+          state: "ready",
+          label: "Capture ready",
+          hint: "Presage verified usable visual signal for this capture.",
+        });
+        return;
+      }
+
+      setPresage({
+        state: "adjust",
+        label: "Adjust framing",
+        hint: data.hint || "Presage wants a cleaner camera signal.",
+      });
+    } catch (presageError) {
+      console.warn("Presage capture check failed:", presageError);
+      setPresage({
+        state: "unavailable",
+        label: "Check unavailable",
+        hint: "Gesture interpretation can continue without the Presage quality check.",
+      });
+    }
+  }
+
   const captureSequence = useCallback(async () => {
     if (!ready || loading || runningRef.current) return;
 
@@ -158,6 +255,11 @@ export default function CameraCapture({
     setCapturing(true);
     setError("");
     setTaken(0);
+    setPresage({
+      state: "checking",
+      label: "Checking signal",
+      hint: "Presage is validating the same camera frames used for this gesture.",
+    });
 
     try {
       // A visible count-in rather than a silent delay: someone with slower
@@ -170,11 +272,21 @@ export default function CameraCapture({
       setCountIn(0);
 
       const frames: string[] = [];
+      const presageFrames: string[] = [];
       const meta: FrameMeta[] = [];
       const started = performance.now();
+      let presageShape: { width: number; height: number; stride: number } | null = null;
 
       for (let i = 0; i < FRAME_COUNT; i++) {
         frames.push(takeFrame());
+
+        const presageFrame = takePresageFrame();
+        presageFrames.push(presageFrame.frame);
+        presageShape = {
+          width: presageFrame.width,
+          height: presageFrame.height,
+          stride: presageFrame.stride,
+        };
 
         // Tell the model when each frame landed and how much was moving, so it
         // knows which frames actually carry the gesture.
@@ -188,7 +300,16 @@ export default function CameraCapture({
         if (i < FRAME_COUNT - 1) await sleep(FRAME_GAP);
       }
 
-      await onCapture(frames, meta);
+      const presagePromise = presageShape
+        ? checkWithPresage(
+            presageFrames,
+            presageShape.width,
+            presageShape.height,
+            presageShape.stride
+          )
+        : Promise.resolve();
+
+      await Promise.all([onCapture(frames, meta), presagePromise]);
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Unable to capture interaction."
@@ -219,6 +340,14 @@ export default function CameraCapture({
   }, [captureSequence]);
 
   const busy = loading || capturing;
+  const presageDot =
+    presage.state === "ready"
+      ? "text-live"
+      : presage.state === "adjust"
+        ? "text-amber-300"
+        : presage.state === "checking"
+          ? "text-white"
+          : "text-white/40";
 
   return (
     <div>
@@ -257,9 +386,16 @@ export default function CameraCapture({
               {ready ? "Live" : "Offline"}
             </span>
 
-            <span className="hidden rounded-full bg-black/35 px-3.5 py-1.5 font-mono text-label text-white/70 backdrop-blur-md sm:block">
-              {FRAME_COUNT} frames · {FRAME_GAP} ms
-            </span>
+            <div className="flex flex-col items-end gap-2">
+              <span className="hidden rounded-full bg-black/35 px-3.5 py-1.5 font-mono text-label text-white/70 backdrop-blur-md sm:block">
+                {FRAME_COUNT} frames · {FRAME_GAP} ms
+              </span>
+
+              <span className="flex items-center gap-2 rounded-full bg-black/35 px-3.5 py-1.5 text-label font-medium text-white backdrop-blur-md">
+                <span aria-hidden className={presageDot}>●</span>
+                Presage · {presage.label}
+              </span>
+            </div>
           </div>
 
           {countIn > 0 && (
@@ -314,6 +450,17 @@ export default function CameraCapture({
       </section>
 
       <canvas ref={canvasRef} className="hidden" />
+      <canvas ref={presageCanvasRef} className="hidden" />
+
+      <div className="mt-3 flex items-start justify-between gap-4 rounded-card bg-surface px-4 py-3 shadow-card">
+        <div>
+          <p className="text-label font-semibold text-text">Presage SmartSpectra</p>
+          <p className="mt-0.5 text-label text-text-soft">{presage.hint}</p>
+        </div>
+        <span className="shrink-0 rounded-full bg-surface-sunk px-3 py-1 font-mono text-[0.625rem] uppercase tracking-wide text-text-soft">
+          capture quality
+        </span>
+      </div>
 
       <button
         type="button"
