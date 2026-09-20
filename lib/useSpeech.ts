@@ -100,6 +100,23 @@ export function useSpeech(message: string) {
     return audioContextRef.current;
   }
 
+  // Call this directly from the user's Capture/Say button gesture. Chrome can
+  // otherwise leave Web Audio suspended by the time Gemini and ElevenLabs have
+  // finished their async requests. Once this shared context is unlocked here,
+  // the later automatic ElevenLabs playback can use it normally.
+  async function prime() {
+    try {
+      const audioContext = await getAudioContext();
+      const buffer = audioContext.createBuffer(1, 1, audioContext.sampleRate);
+      const source = audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioContext.destination);
+      source.start(0);
+    } catch (error) {
+      console.warn("Could not prime browser audio.", error);
+    }
+  }
+
   async function read() {
     if (!message.trim()) return;
 
@@ -108,8 +125,9 @@ export function useSpeech(message: string) {
     setSpokenWord(-1);
 
     try {
-      // Resume Web Audio immediately while this function still has the user's
-      // click gesture. This avoids browser autoplay blocking after the fetch.
+      // If read() comes from the Say button, this resumes Web Audio while the
+      // user gesture is still active. Automatic playback uses the same context
+      // previously unlocked by prime() when Capture was pressed.
       const audioContext = await getAudioContext();
 
       const response = await fetch("/api/speech", {
@@ -204,6 +222,7 @@ export function useSpeech(message: string) {
     speaking,
     spokenWord,
     speechEngine,
+    prime,
     read,
     stop,
     reset,
