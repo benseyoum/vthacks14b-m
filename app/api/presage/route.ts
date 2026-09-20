@@ -173,7 +173,7 @@ export async function POST(request: Request) {
     sdk.useCustomInput(FrameTransform.kNone);
     sdk.start();
 
-    const baseTimestampUs = Number(process.hrtime.bigint() / 1000n);
+    const baseTimestampUs = Date.now() * 1000;
     let acceptedFrames = 0;
 
     for (let index = 0; index < frames.length; index += 1) {
