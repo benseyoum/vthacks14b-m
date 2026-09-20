@@ -100,10 +100,9 @@ export function useSpeech(message: string) {
     return audioContextRef.current;
   }
 
-  // Call this directly from the user's Capture/Say button gesture. Chrome can
-  // otherwise leave Web Audio suspended by the time Gemini and ElevenLabs have
-  // finished their async requests. Once this shared context is unlocked here,
-  // the later automatic ElevenLabs playback can use it normally.
+  // Chrome only guarantees audio startup while handling a real user gesture.
+  // Unlock the shared Web Audio context on the first click/key press so the
+  // later automatic ElevenLabs playback (after Gemini finishes) is allowed.
   async function prime() {
     try {
       const audioContext = await getAudioContext();
@@ -117,6 +116,24 @@ export function useSpeech(message: string) {
     }
   }
 
+  useEffect(() => {
+    function unlockAudio() {
+      void prime();
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+    }
+
+    window.addEventListener("pointerdown", unlockAudio);
+    window.addEventListener("keydown", unlockAudio);
+
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+    };
+    // prime() intentionally uses the stable refs created by this hook.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function read() {
     if (!message.trim()) return;
 
@@ -125,9 +142,6 @@ export function useSpeech(message: string) {
     setSpokenWord(-1);
 
     try {
-      // If read() comes from the Say button, this resumes Web Audio while the
-      // user gesture is still active. Automatic playback uses the same context
-      // previously unlocked by prime() when Capture was pressed.
       const audioContext = await getAudioContext();
 
       const response = await fetch("/api/speech", {
