@@ -22,6 +22,17 @@ function wordIndexForCharacter(text: string, characterIndex: number) {
   return Math.max(0, words.length - 1);
 }
 
+function base64ToArrayBuffer(base64: string) {
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return bytes.buffer;
+}
+
 export function useSpeech(message: string) {
   const [speaking, setSpeaking] = useState(false);
   const [spokenWord, setSpokenWord] = useState(-1);
@@ -30,16 +41,26 @@ export function useSpeech(message: string) {
   );
 
   const spokenFor = useRef("");
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const timersRef = useRef<number[]>([]);
 
   useEffect(() => {
     primeVoices();
+
     return () => {
       timersRef.current.forEach((timer) => window.clearTimeout(timer));
       timersRef.current = [];
-      audioRef.current?.pause();
-      audioRef.current = null;
+
+      try {
+        sourceRef.current?.stop();
+      } catch {
+        // Source may already have ended.
+      }
+
+      sourceRef.current = null;
+      void audioContextRef.current?.close();
+      audioContextRef.current = null;
       cancelSpeech();
     };
   }, []);
@@ -51,6 +72,7 @@ export function useSpeech(message: string) {
 
   function finish() {
     clearTimers();
+    sourceRef.current = null;
     setSpeaking(false);
     setSpokenWord(-1);
   }
@@ -66,6 +88,18 @@ export function useSpeech(message: string) {
     });
   }
 
+  async function getAudioContext() {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+
+    if (audioContextRef.current.state === "suspended") {
+      await audioContextRef.current.resume();
+    }
+
+    return audioContextRef.current;
+  }
+
   async function read() {
     if (!message.trim()) return;
 
@@ -74,6 +108,10 @@ export function useSpeech(message: string) {
     setSpokenWord(-1);
 
     try {
+      // Resume Web Audio immediately while this function still has the user's
+      // click gesture. This avoids browser autoplay blocking after the fetch.
+      const audioContext = await getAudioContext();
+
       const response = await fetch("/api/speech", {
         method: "POST",
         headers: {
@@ -92,8 +130,13 @@ export function useSpeech(message: string) {
         throw new Error("ElevenLabs returned no audio");
       }
 
-      const audio = new Audio(`data:audio/mpeg;base64,${data.audioBase64}`);
-      audioRef.current = audio;
+      const audioBuffer = await audioContext.decodeAudioData(
+        base64ToArrayBuffer(data.audioBase64)
+      );
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+      sourceRef.current = source;
       setSpeechEngine("elevenlabs");
 
       if (data.alignment) {
@@ -114,14 +157,10 @@ export function useSpeech(message: string) {
         });
       }
 
-      audio.onended = finish;
-      audio.onerror = () => {
-        finish();
-        readWithBrowser();
-      };
-
-      await audio.play();
-    } catch {
+      source.onended = finish;
+      source.start(0);
+    } catch (error) {
+      console.warn("ElevenLabs browser playback failed; using device voice.", error);
       finish();
       readWithBrowser();
     }
@@ -129,8 +168,20 @@ export function useSpeech(message: string) {
 
   function stop() {
     clearTimers();
-    audioRef.current?.pause();
-    audioRef.current = null;
+
+    if (sourceRef.current) {
+      sourceRef.current.onended = null;
+
+      try {
+        sourceRef.current.stop();
+      } catch {
+        // Source may already have ended.
+      }
+
+      sourceRef.current.disconnect();
+      sourceRef.current = null;
+    }
+
     cancelSpeech();
     setSpeaking(false);
     setSpokenWord(-1);
